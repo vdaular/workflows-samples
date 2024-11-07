@@ -3,6 +3,7 @@ using EmployeeOnboarding.Web.Data;
 using EmployeeOnboarding.Web.HostedServices;
 using EmployeeOnboarding.Web.Services;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Identity.Client;
 
 var builder = WebApplication.CreateBuilder(args);
 var configuration = builder.Configuration;
@@ -12,13 +13,28 @@ builder.Services.AddControllersWithViews();
 builder.Services.AddDbContextFactory<OnboardingDbContext>(options => options.UseSqlite("Data Source=onboarding.db"));
 builder.Services.AddHostedService<MigrationsHostedService>();
 
-// Configure Elsa API client.
-builder.Services.AddHttpClient<ElsaClient>(httpClient =>
+builder.Services.AddHttpClient<ElsaClient>(async httpClient =>
 {
     var url = configuration["Elsa:ServerUrl"]!.TrimEnd('/') + '/';
-    var apiKey = configuration["Elsa:ApiKey"]!;
     httpClient.BaseAddress = new Uri(url);
-    httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("ApiKey", apiKey);
+
+    // Get access token from Microsoft Entra
+    var tenantId = configuration["AzureAd:TenantId"];
+    var clientId = configuration["AzureAd:ClientId"];
+    var clientSecret = configuration["AzureAd:ClientSecret"];
+    var scope = "api://0000-0000-0000/.default";
+
+    var app = ConfidentialClientApplicationBuilder.Create(clientId)
+        .WithClientSecret(clientSecret)
+        .WithAuthority(new Uri($"https://login.microsoftonline.com/{tenantId}"))
+        .Build();
+
+    // Acquire token for the API
+    var result = await app.AcquireTokenForClient(new[] { scope }).ExecuteAsync();
+    var accessToken = result.AccessToken;
+
+    // Set Bearer token in the Authorization header
+    httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
 });
 
 var app = builder.Build();
